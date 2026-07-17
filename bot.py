@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
 import shlex
 import subprocess
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import discord
@@ -28,6 +31,13 @@ SERVER_EXE = Path(os.getenv("PALSERVER_EXE", "")).expanduser().resolve()
 WORKING_DIR = Path(os.getenv("PALSERVER_WORKING_DIR", str(SERVER_EXE.parent))).expanduser().resolve()
 SERVER_ARGS = shlex.split(os.getenv("PALSERVER_ARGS", ""), posix=False)
 STOP_TIMEOUT = max(1, int(os.getenv("STOP_TIMEOUT_SECONDS", "30")))
+REST_API_URL = os.getenv("PAL_REST_API_URL", "http://127.0.0.1:8212/v1/api").rstrip("/")
+REST_API_USER = os.getenv("PAL_REST_API_USER", "admin")
+REST_API_PASSWORD = os.getenv("PAL_REST_API_PASSWORD", "")
+SHUTDOWN_DELAY = max(0, int(os.getenv("SHUTDOWN_DELAY_SECONDS", "10")))
+SHUTDOWN_MESSAGE = os.getenv(
+    "SHUTDOWN_MESSAGE", "Server is shutting down for maintenance."
+)
 STATE_FILE = Path(__file__).with_name("palbot-state.json")
 
 
@@ -91,12 +101,37 @@ def start_server_sync() -> tuple[bool, str]:
     return True, f"Palworld server started (PID {process.pid})."
 
 
-def stop_server_sync() -> tuple[bool, str]:
-    process = find_server_process()
-    if not process:
-        return False, "The Palworld server is not running."
+def pal_api_post(endpoint: str, payload: dict | None = None) -> None:
+    if not REST_API_PASSWORD:
+        raise RuntimeError("PAL_REST_API_PASSWORD is missing")
 
-    pid = process.pid
+    credentials = base64.b64encode(
+        f"{REST_API_USER}:{REST_API_PASSWORD}".encode("utf-8")
+    ).decode("ascii")
+    body = json.dumps(payload).encode("utf-8") if payload is not None else b""
+    request = urllib.request.Request(
+        f"{REST_API_URL}/{endpoint.lstrip('/')}",
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            if response.status != 200:
+                raise RuntimeError(f"Palworld API returned HTTP {response.status}")
+    except urllib.error.HTTPError as error:
+        if error.code == 401:
+            raise RuntimeError("Palworld REST API rejected the username or password") from error
+        raise RuntimeError(f"Palworld REST API returned HTTP {error.code}") from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"Could not connect to the Palworld REST API: {error.reason}") from error
+
+
+def force_stop_process_tree(process: psutil.Process) -> None:
     children = process.children(recursive=True)
     targets = children + [process]
     for target in reversed(targets):
@@ -112,9 +147,32 @@ def stop_server_sync() -> tuple[bool, str]:
         except psutil.Error:
             pass
     psutil.wait_procs(alive, timeout=5)
+
+
+def stop_server_sync() -> tuple[bool, str]:
+    process = find_server_process()
+    if not process:
+        return False, "The Palworld server is not running."
+
+    pid = process.pid
+    # Refuse to terminate the process if saving or authentication fails.
+    pal_api_post("save")
+    pal_api_post(
+        "shutdown",
+        {"waittime": SHUTDOWN_DELAY, "message": SHUTDOWN_MESSAGE},
+    )
+
+    try:
+        process.wait(timeout=SHUTDOWN_DELAY + STOP_TIMEOUT)
+        forced = False
+    except psutil.TimeoutExpired:
+        log.warning("Graceful Palworld shutdown timed out; terminating process tree")
+        force_stop_process_tree(process)
+        forced = True
+
     STATE_FILE.unlink(missing_ok=True)
-    suffix = " (forced after timeout)" if alive else ""
-    return True, f"Palworld server stopped (PID {pid}){suffix}."
+    suffix = " (forced after graceful shutdown timed out)" if forced else ""
+    return True, f"World saved and Palworld server stopped (PID {pid}){suffix}."
 
 
 class PalBot(discord.Client):
@@ -173,9 +231,9 @@ async def palstop(interaction: discord.Interaction) -> None:
     async with bot.operation_lock:
         try:
             _, message = await asyncio.to_thread(stop_server_sync)
-        except Exception:
+        except Exception as error:
             log.exception("Could not stop server")
-            message = "Stopping the server failed. Check the bot log on the Windows server."
+            message = f"Stopping failed safely; the server was left running: {error}"
     await interaction.followup.send(message, ephemeral=True)
 
 
@@ -196,4 +254,3 @@ async def on_ready() -> None:
 if __name__ == "__main__":
     configured()
     bot.run(TOKEN, log_handler=None)
-
