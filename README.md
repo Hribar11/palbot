@@ -1,14 +1,16 @@
 # PalBot
 
-A small Discord bot that starts, stops, and checks a Palworld dedicated server running on the same Windows machine.
+A small Discord bot that starts, stops, and monitors a Palworld dedicated server running on the same Windows machine.
 
 ## Commands
 
 - `/palstart` — starts the configured server executable
 - `/palstop` — saves the world and gracefully shuts down the server
 - `/palstatus` — reports whether it is running
+- `/palstats` — shows players, FPS, frame time, uptime, world days, and base camps
+- `/palhelp` — lists every available command
 
-Only members with the configured Discord role can use these commands. Replies are private (ephemeral).
+Only members with the configured Discord role can use the server commands. `/palhelp` is available to everyone. Replies are private (ephemeral).
 
 ## Set up Discord
 

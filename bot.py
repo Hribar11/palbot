@@ -101,18 +101,20 @@ def start_server_sync() -> tuple[bool, str]:
     return True, f"Palworld server started (PID {process.pid})."
 
 
-def pal_api_post(endpoint: str, payload: dict | None = None) -> None:
+def pal_api_request(
+    endpoint: str, method: str = "GET", payload: dict | None = None
+) -> dict:
     if not REST_API_PASSWORD:
         raise RuntimeError("PAL_REST_API_PASSWORD is missing")
 
     credentials = base64.b64encode(
         f"{REST_API_USER}:{REST_API_PASSWORD}".encode("utf-8")
     ).decode("ascii")
-    body = json.dumps(payload).encode("utf-8") if payload is not None else b""
+    body = json.dumps(payload).encode("utf-8") if payload is not None else None
     request = urllib.request.Request(
         f"{REST_API_URL}/{endpoint.lstrip('/')}",
         data=body,
-        method="POST",
+        method=method,
         headers={
             "Authorization": f"Basic {credentials}",
             "Content-Type": "application/json",
@@ -123,12 +125,39 @@ def pal_api_post(endpoint: str, payload: dict | None = None) -> None:
         with urllib.request.urlopen(request, timeout=10) as response:
             if response.status != 200:
                 raise RuntimeError(f"Palworld API returned HTTP {response.status}")
+            response_body = response.read()
+            return json.loads(response_body) if response_body else {}
     except urllib.error.HTTPError as error:
         if error.code == 401:
             raise RuntimeError("Palworld REST API rejected the username or password") from error
         raise RuntimeError(f"Palworld REST API returned HTTP {error.code}") from error
     except urllib.error.URLError as error:
         raise RuntimeError(f"Could not connect to the Palworld REST API: {error.reason}") from error
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Palworld REST API returned invalid JSON") from error
+
+
+def pal_api_post(endpoint: str, payload: dict | None = None) -> None:
+    pal_api_request(endpoint, method="POST", payload=payload)
+
+
+def get_server_stats_sync() -> dict:
+    return pal_api_request("metrics")
+
+
+def format_duration(total_seconds: int) -> str:
+    days, remainder = divmod(max(0, total_seconds), 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = []
+    if days:
+        parts.append(f"{days}d")
+    if hours or days:
+        parts.append(f"{hours}h")
+    if minutes or hours or days:
+        parts.append(f"{minutes}m")
+    parts.append(f"{seconds}s")
+    return " ".join(parts)
 
 
 def force_stop_process_tree(process: psutil.Process) -> None:
@@ -244,6 +273,58 @@ async def palstatus(interaction: discord.Interaction) -> None:
     process = await asyncio.to_thread(find_server_process)
     message = f"Palworld server is running (PID {process.pid})." if process else "Palworld server is stopped."
     await interaction.response.send_message(message, ephemeral=True)
+
+
+@bot.tree.command(name="palstats", description="Show live Palworld server statistics")
+async def palstats(interaction: discord.Interaction) -> None:
+    if not await require_authorized(interaction):
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    if not await asyncio.to_thread(find_server_process):
+        await interaction.followup.send("Palworld server is stopped.", ephemeral=True)
+        return
+    try:
+        stats = await asyncio.to_thread(get_server_stats_sync)
+        embed = discord.Embed(title="Palworld Server Stats", color=discord.Color.green())
+        embed.add_field(
+            name="Players",
+            value=f"{stats.get('currentplayernum', '?')} / {stats.get('maxplayernum', '?')}",
+        )
+        embed.add_field(name="Server FPS", value=str(stats.get("serverfps", "?")))
+        frame_time = stats.get("serverframetime")
+        embed.add_field(
+            name="Frame time",
+            value=f"{frame_time:.2f} ms" if isinstance(frame_time, (int, float)) else "?",
+        )
+        embed.add_field(
+            name="Uptime",
+            value=format_duration(int(stats.get("uptime", 0))),
+        )
+        embed.add_field(name="World days", value=str(stats.get("days", "?")))
+        embed.add_field(name="Base camps", value=str(stats.get("basecampnum", "?")))
+        await interaction.followup.send(embed=embed, ephemeral=True)
+    except Exception as error:
+        log.exception("Could not read server statistics")
+        await interaction.followup.send(
+            f"Could not read Palworld server statistics: {error}", ephemeral=True
+        )
+
+
+@bot.tree.command(name="palhelp", description="List PalBot commands")
+async def palhelp(interaction: discord.Interaction) -> None:
+    embed = discord.Embed(
+        title="PalBot Commands",
+        description=f"Server commands require the `{ALLOWED_ROLE}` role.",
+        color=discord.Color.blurple(),
+    )
+    embed.add_field(name="/palstart", value="Start the Palworld server.", inline=False)
+    embed.add_field(
+        name="/palstop", value="Save the world and gracefully stop the server.", inline=False
+    )
+    embed.add_field(name="/palstatus", value="Check whether the server is running.", inline=False)
+    embed.add_field(name="/palstats", value="Show live server performance and world stats.", inline=False)
+    embed.add_field(name="/palhelp", value="Show this command list.", inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 @bot.event
