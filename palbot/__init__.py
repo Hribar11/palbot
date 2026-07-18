@@ -1,0 +1,2 @@
+"""PalBot package."""
+

@@ -2,6 +2,23 @@
 
 A small Discord bot that starts, stops, and monitors a Palworld dedicated server running on the same Windows machine.
 
+## Project structure
+
+```text
+bot.py                      Minimal application entry point
+palbot/settings.py          Environment variables and paths
+palbot/server.py            Process control and Palworld REST API
+palbot/ini_editor.py        Validated INI reading, editing, and backups
+palbot/permissions.py       Player/admin role checks
+palbot/client.py            Discord client and command synchronization
+palbot/commands/start.py    /palstart
+palbot/commands/stop.py     /palstop
+palbot/commands/status.py   /palstatus
+palbot/commands/stats.py    /palstats
+palbot/commands/help.py     /palhelp
+palbot/commands/palconfig.py  /palconfig command group
+```
+
 ## Commands
 
 - `/palstart` — starts the configured server executable
@@ -9,8 +26,11 @@ A small Discord bot that starts, stops, and monitors a Palworld dedicated server
 - `/palstatus` — reports whether it is running
 - `/palstats` — shows players, FPS, frame time, uptime, world days, and base camps
 - `/palhelp` — lists every available command
+- `/palconfig get parameter` — reads a supported INI setting (admins only)
+- `/palconfig set parameter value` — validates and changes a setting (admins only)
+- `/palconfig list` — lists editable settings and their allowed values (admins only)
 
-Only members with the configured Discord role can use the server commands. `/palhelp` is available to everyone. Replies are private (ephemeral).
+Members with either the `Palworld Players` or `Palworld Admins` role can start, stop, and inspect the server. Only `Palworld Admins` can edit settings. `/palhelp` is available to everyone. Role names are configurable and replies are private (ephemeral).
 
 ## Set up Discord
 
@@ -18,7 +38,7 @@ Only members with the configured Discord role can use the server commands. `/pal
 2. Copy the bot token. Never post or commit it.
 3. Under **OAuth2 > URL Generator**, select `bot` and `applications.commands`. The bot needs no Discord permissions beyond **View Channels**. Open the generated URL to invite it.
 4. In Discord, enable Developer Mode, right-click your server, and choose **Copy Server ID**.
-5. Create a role such as `Palworld Admin` and give it only to trusted members.
+5. Create `Palworld Players` and `Palworld Admins` roles. Give the admin role only to people trusted to change server settings.
 
 ## Install on the Windows server
 
@@ -33,7 +53,26 @@ notepad .env
 python bot.py
 ```
 
-Set `PALSERVER_EXE` to the actual executable used by your current Palworld launch script. Depending on the installation, this may instead be a top-level `PalServer.exe`. Set `PALSERVER_WORKING_DIR` to its containing folder and copy any launch arguments into `PALSERVER_ARGS`.
+Set `PALSERVER_EXE` to the top-level `PalServer.exe`, set `PALSERVER_WORKING_DIR` to the installation directory containing it, and copy any existing launch arguments into `PALSERVER_ARGS`:
+
+```env
+PALSERVER_EXE=C:\PalworldServer\PalServer.exe
+PALSERVER_WORKING_DIR=C:\PalworldServer
+```
+
+Set the role names and active INI path in `.env`:
+
+```env
+PALWORLD_PLAYER_ROLE_NAME=Palworld Players
+PALWORLD_ADMIN_ROLE_NAME=Palworld Admins
+PALWORLD_SETTINGS_INI=C:\PalworldServer\Pal\Saved\Config\WindowsServer\PalWorldSettings.ini
+```
+
+### Edit settings from Discord
+
+Admins can use `/palconfig list`, `/palconfig get`, and `/palconfig set`. Discord autocompletes the supported parameter names and common values. Numeric ranges, booleans, and fixed choices are checked before the file is changed.
+
+For safety, configuration changes are accepted only while Palworld is stopped. Each successful edit creates a timestamped `.bak` file next to `PalWorldSettings.ini`; start the server afterward to apply the new value. Secret and infrastructure settings—including passwords, REST API options, ports, and arbitrary INI text—cannot be changed through Discord.
 
 ### Enable safe saving and shutdown
 
@@ -41,6 +80,15 @@ Edit the active Windows server configuration, normally:
 
 ```text
 Pal\Saved\Config\WindowsServer\PalWorldSettings.ini
+```
+
+If that file is empty, fully stop Palworld and copy the supplied defaults from the installation directory:
+
+```powershell
+Copy-Item `
+  .\DefaultPalWorldSettings.ini `
+  .\Pal\Saved\Config\WindowsServer\PalWorldSettings.ini `
+  -Force
 ```
 
 Inside its `OptionSettings=(...)` value, set these fields:
