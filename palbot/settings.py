@@ -47,6 +47,14 @@ SHUTDOWN_MESSAGE = os.getenv(
     "SHUTDOWN_MESSAGE", "Server is shutting down for maintenance."
 )
 STATE_FILE = Path(__file__).parent.parent / "palbot-state.json"
+COMMAND_LOG_FILE = Path(
+    os.getenv(
+        "COMMAND_LOG_FILE",
+        str(Path(__file__).parent.parent / "logs" / "commands.log"),
+    )
+).expanduser().resolve()
+COMMAND_LOG_MAX_BYTES = max(1024, int(os.getenv("COMMAND_LOG_MAX_BYTES", "5242880")))
+COMMAND_LOG_BACKUPS = max(1, int(os.getenv("COMMAND_LOG_BACKUPS", "5")))
 
 
 def validate_startup_config() -> None:
@@ -56,4 +64,3 @@ def validate_startup_config() -> None:
         raise RuntimeError(f"PALSERVER_EXE is not a file: {SERVER_EXE}")
     if not WORKING_DIR.is_dir():
         raise RuntimeError(f"PALSERVER_WORKING_DIR is not a directory: {WORKING_DIR}")
-

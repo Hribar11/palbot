@@ -4,8 +4,8 @@ import asyncio
 import logging
 
 import discord
-from discord import app_commands
 
+from palbot.audit import AuditCommandTree
 from palbot.commands import register_commands
 from palbot.settings import GUILD_ID
 
@@ -16,7 +16,7 @@ log = logging.getLogger("palbot.client")
 class PalBot(discord.Client):
     def __init__(self) -> None:
         super().__init__(intents=discord.Intents.default())
-        self.tree = app_commands.CommandTree(self)
+        self.tree = AuditCommandTree(self)
         self.operation_lock = asyncio.Lock()
         register_commands(self)
 
@@ -32,4 +32,3 @@ class PalBot(discord.Client):
 
     async def on_ready(self) -> None:
         log.info("Signed in as %s (%s)", self.user, self.user.id if self.user else "unknown")
-

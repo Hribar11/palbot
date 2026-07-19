@@ -7,6 +7,7 @@ A small Discord bot that starts, stops, and monitors a Palworld dedicated server
 ```text
 bot.py                      Minimal application entry point
 palbot/settings.py          Environment variables and paths
+palbot/audit.py             Structured command audit logging and rotation
 palbot/server.py            Process control and Palworld REST API
 palbot/ini_editor.py        Validated INI reading, editing, and backups
 palbot/permissions.py       Player/admin role checks
@@ -31,6 +32,32 @@ palbot/commands/palconfig.py  /palconfig command group
 - `/palconfig list` — lists editable settings and their allowed values (admins only)
 
 Members with either the `Palworld Players` or `Palworld Admins` role can start, stop, and inspect the server. Only `Palworld Admins` can edit settings. `/palhelp` is available to everyone. Role names are configurable and replies are private (ephemeral).
+
+## Command audit log
+
+Every slash-command attempt is written to `logs\commands.log` by default, including attempts by users without the required role. Each line is a JSON record containing:
+
+- local timestamp with timezone
+- full command name, such as `palconfig set`
+- supplied parameters and values
+- Discord username and user ID
+- guild and channel IDs
+
+Example:
+
+```json
+{"timestamp":"2026-07-19T14:30:05+02:00","event":"command_invoked","command":"palconfig set","parameters":{"parameter":"ExpRate","value":"2.5"},"user":"ExampleUser","user_id":123456789,"guild_id":987654321,"channel_id":456789123}
+```
+
+The log rotates at 5 MiB and retains five older files by default. These values can be changed in `.env`:
+
+```env
+COMMAND_LOG_FILE=C:\PalBot\logs\commands.log
+COMMAND_LOG_MAX_BYTES=5242880
+COMMAND_LOG_BACKUPS=5
+```
+
+The `logs` directory is ignored by Git. Treat audit logs as private because they contain Discord identities, channel IDs, and configuration values. PalBot does not expose password settings through Discord.
 
 ## Set up Discord
 
